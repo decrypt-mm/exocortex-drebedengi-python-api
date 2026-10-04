@@ -317,6 +317,58 @@ class DrebedengiAPI:
         items: List[etree.Element] = root.findall(".//setRecordListReturn/item")
         return [xmlmap_to_dict(item) for item in items]
 
+    def set_check_list(self, checks: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Implements setCheckList API — insert or update QR checks in bulk.
+
+        Each check is a dict with one of the ID keys (which decides the action):
+
+            - ``client_id`` (int): an arbitrary local ID — *insert* a new check;
+              the server's reply will map this client_id back to the assigned server_id
+            - ``server_id`` (int): existing check ID — *update* this check on the server
+
+        Other fields (payload shape is a working hypothesis for the QR-submit spike;
+        ``ext`` — the raw QR string — is the only check field documented in
+        getCheckList):
+
+            - ``ext`` (str): QR URL / raw QR string of the check (54-FZ format);
+              qr_sum/qr_date/items are fetched by the DD server from the fiscal
+              registry on its own
+            - ``state`` (any): processing state, if the server requires it
+
+        Returns the array of ``{server_id, client_id}`` maps that the server sent
+        back (same shape as :meth:`set_record_list`). An empty list means the
+        server returned no maps. Raises :class:`DrebedengiAPIError` on a SOAP Fault.
+
+        Original WSDL description:
+            Insert or update check list; [list] => array of arrays: 'server_id' or
+            'client_id' [int8] - server or client ID of the check# If client ID is
+            present - try to insert new check, and return server2client
+            correspondence in the result array# If server_id is present - try to
+            update existing check;
+        """
+        if not checks:
+            return []
+
+        # SOAP wants a SOAP-encoded array of ns2:Map's, one Map per check — the
+        # same serialization set_record_list uses (see the comment there).
+        list_xml = generate_xml_map_array(
+            [zeep.helpers.create_xml_soap_map(c) for c in checks]  # type: ignore
+        )
+
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.setCheckList(
+                self.api_key,
+                self.login,
+                self.password,
+                list=list_xml,
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        items: List[etree.Element] = root.findall(".//setCheckListReturn/item")
+        return [xmlmap_to_dict(item) for item in items]
+
     def delete_object(self, *, object_id: int, object_type: DeletableObjectType) -> bool:
         """
         Implements deleteObject API — delete a single object on the server.
