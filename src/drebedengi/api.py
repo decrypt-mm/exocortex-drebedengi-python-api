@@ -323,22 +323,32 @@ class DrebedengiAPI:
 
         Each check is a dict with one of the ID keys (which decides the action):
 
-            - ``client_id`` (int): an arbitrary local ID — *insert* a new check;
-              the server's reply will map this client_id back to the assigned server_id
-            - ``server_id`` (int): existing check ID — *update* this check on the server
+            - ``client_id`` (int): user ID from :meth:`get_user_id_by_login` —
+              *insert* a new check; the server's reply echoes it back with the
+              assigned server_id
+            - ``server_id`` (int): existing check ID — *update* this check on the
+              server (touches sum/process/state only)
 
-        Other fields (payload shape is a working hypothesis for the QR-submit spike;
-        ``ext`` — the raw QR string — is the only check field documented in
-        getCheckList):
+        Payload fields proven by the live spike (2026-10-04, receipt server_id
+        8117456):
 
-            - ``ext`` (str): QR URL / raw QR string of the check (54-FZ format);
-              qr_sum/qr_date/items are fetched by the DD server from the fiscal
-              registry on its own
-            - ``state`` (any): processing state, if the server requires it
+            - ``filename`` (str): the raw QR string of the check (54-FZ format,
+              ``t=...&s=...&fn=...&i=...&fp=...&n=...``). Despite the name, the
+              server maps this key to the ``ext`` column — the same field that
+              getCheckList returns as ``[ext] => qr-url``. The server parses the
+              QR itself and fills qr_date/qr_sum from it.
+            - ``process`` (int): ``1`` — processing flag the server reads
+              unconditionally; any value passes.
+            - ``sum`` (int): check sum in kopecks (bigint column; a decimal
+              point makes the INSERT fail).
+            - ``ext`` (str): IGNORED on insert (a map key named ``ext`` never
+              reaches the ``ext`` column — without ``filename`` the INSERT dies
+              with a NOT NULL violation).
 
-        Returns the array of ``{server_id, client_id}`` maps that the server sent
-        back (same shape as :meth:`set_record_list`). An empty list means the
-        server returned no maps. Raises :class:`DrebedengiAPIError` on a SOAP Fault.
+        Returns the array of ``{server_id, client_id, status}`` maps that the
+        server sent back (``status``: ``inserted``/``updated``; same shape as
+        :meth:`set_record_list`). An empty list means the server returned no
+        maps. Raises :class:`DrebedengiAPIError` on a SOAP Fault.
 
         Original WSDL description:
             Insert or update check list; [list] => array of arrays: 'server_id' or
@@ -368,6 +378,44 @@ class DrebedengiAPI:
         root = etree.fromstring(result.content)
         items: List[etree.Element] = root.findall(".//setCheckListReturn/item")
         return [xmlmap_to_dict(item) for item in items]
+
+    def get_user_id_by_login(self) -> int:
+        """
+        Implements getUserIdByLogin API — internal DD user ID for this login.
+
+        The ID feeds ``client_id`` of :meth:`set_check_list` (insert action).
+        Note it equals the numeric prefix of the API key (``<user_id>_api``),
+        but is fetched explicitly instead of parsing that.
+
+        Returns:
+            Internal user ID as int.
+
+        Raises:
+            DrebedengiAPIError: on any server-side error.
+
+        Original WSDL description:
+            Get internal user ID by login; For multi user mode, this value contained
+            in 'purse_of_nuid' field of the current user;
+        """
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.getUserIdByLogin(
+                self.api_key,
+                self.login,
+                self.password,
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        raw = root.findtext(".//getUserIdByLoginReturn")
+        # ASCII-only: str.isdigit() пропускает не-ASCII цифры ('²'.isdigit()
+        # is True, но int('²') падает; арабские цифры интятся в другие числа)
+        if raw is None or re.fullmatch(r"[0-9]+", str(raw).strip()) is None:
+            raise DrebedengiAPIError(
+                f"getUserIdByLogin returned unexpected payload: {raw!r}",
+                status_code=0,
+                response_text=result.content.decode("utf-8", "replace"),
+            )
+        return int(raw)
 
     def delete_object(self, *, object_id: int, object_type: DeletableObjectType) -> bool:
         """
