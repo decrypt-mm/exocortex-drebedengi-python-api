@@ -417,6 +417,40 @@ class DrebedengiAPI:
             )
         return int(raw)
 
+    def set_check_to_record_list(self, links: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Implements setCheckToRecordList API — link checks to records.
+
+        Each link is a dict:
+            - ``check_id`` (int): server ID of the check (from setCheckList reply)
+            - ``record_id`` (int): server ID of the record (from setRecordList reply)
+            - ``server_id`` (int): for update; ``client_id`` (int): for insert
+
+        Returns the array of ``{server_id, client_id}`` maps from the server.
+
+        Original WSDL description:
+            Insert or update check to record link list; [list] => array of arrays.
+        """
+        if not links:
+            return []
+
+        list_xml = generate_xml_map_array(
+            [zeep.helpers.create_xml_soap_map(r) for r in links]  # type: ignore
+        )
+
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.setCheckToRecordList(
+                self.api_key,
+                self.login,
+                self.password,
+                list=list_xml,
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        items: List[etree.Element] = root.findall(".//setCheckToRecordListReturn/item")
+        return [xmlmap_to_dict(item) for item in items]
+
     def delete_object(self, *, object_id: int, object_type: DeletableObjectType) -> bool:
         """
         Implements deleteObject API — delete a single object on the server.
