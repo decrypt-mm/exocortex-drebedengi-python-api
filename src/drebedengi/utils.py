@@ -148,22 +148,21 @@ def generate_xml_map_array(maps: List[Any]) -> xsd.ComplexType:
 def check_same_transfer_transactions(tr1: Transaction, tr2: Transaction) -> bool:
     """Return True if *tr1* and *tr2* look like the two legs of the same transfer.
 
-    Comment-matching semantics: comments are compared only when BOTH transactions
-    carry a non-None comment.  When either comment is None the constraint is skipped —
-    this avoids a false-positive where two unrelated commentless transfers would
-    spuriously match simply because ``None == None``.  Transfer pairs created by
-    drebedengi are always symmetric: if the user set a comment, both legs carry it;
-    if not, both are None — so skipping the check when either side is absent is safe.
+    Comment-matching semantics: STRICT — the comments must match (``""`` and
+    ``None`` both count as "no comment").  Basis: full-history probe of live
+    drebedengi data (2026-11-09, all 829 unambiguous transfer pairs of this
+    account): every pair carries either no comment on both legs (497) or the
+    identical comment on both legs (332); one-sided or differing comments
+    never occur.  A one-sided comment therefore identifies two DIFFERENT
+    operations, not a pair.
     """
-    comments_match = (
-        tr1.comment == tr2.comment
-        if tr1.comment is not None and tr2.comment is not None
-        else True
-    )
+    def _comment_key(comment: str | None) -> str | None:
+        return comment if comment else None
+
     return (
         tr1.amount == -tr2.amount
         and tr1.budget_family_id == tr2.budget_family_id
-        and comments_match
+        and _comment_key(tr1.comment) == _comment_key(tr2.comment)
         and tr1.currency_id == tr2.currency_id
         and tr1.operation_date == tr2.operation_date
         and tr1.user_nuid == tr2.user_nuid

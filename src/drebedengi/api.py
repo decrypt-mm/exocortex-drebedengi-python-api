@@ -894,6 +894,10 @@ class DrebedengiAPI:
         not specified further in the WSDL.  The caller must treat the result as advisory data and
         validate / fill in missing fields before calling :meth:`set_record_list`.
 
+        The raw ``List[Dict[str, str]]`` return type is deliberate: no consumer needs a typed
+        model of this response, and building one would require a real bank SMS/push sample
+        to model against (kept as is by decision, TODO Pool card 2026-08-07-185000).
+
         Args:
             texts: List of UTF-8 strings to parse (e.g. raw SMS or push notification text).
                 The server treats the list as a 0-based indexed array.
@@ -962,7 +966,9 @@ class DrebedengiAPI:
 
         Note:
             The exact response field set is undocumented (same caveat as
-            :meth:`parse_text_data`).
+            :meth:`parse_text_data`).  The raw ``List[Dict[str, str]]`` return
+            type is deliberate — no consumer needs a typed model of this
+            response (kept as is by decision, TODO Pool card 2026-08-07-185000).
 
         Original WSDL description:
             Try to parse text data as records; [def..] default field values if no rules

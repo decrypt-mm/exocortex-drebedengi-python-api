@@ -158,7 +158,7 @@ def _make_transfer_pair(comment1: str | None, comment2: str | None):
 def test_transfer_match_both_none_comments() -> None:
     """Two transfers with None comments should still match (symmetric absence is OK)."""
     tr1, tr2 = _make_transfer_pair(None, None)
-    # Both None → skip comment constraint → match on other fields
+    # Both None → comments match (equal absence) → pair
     assert check_same_transfer_transactions(tr1, tr2) is True
 
 
@@ -172,8 +172,18 @@ def test_transfer_no_match_different_comments() -> None:
     assert check_same_transfer_transactions(tr1, tr2) is False
 
 
-def test_transfer_match_one_none_one_set() -> None:
-    """One transfer has comment, the other doesn't — constraint skipped, match by other fields."""
+def test_transfer_no_match_one_sided_comment() -> None:
+    """One transfer has a comment, the other doesn't — not a pair (strict).
+
+    Live-data basis (2026-11-09, all 829 transfer pairs of this account):
+    real drebedengi pairs are always comment-symmetric, so a one-sided
+    comment identifies two different operations (see utils docstring).
+    """
     tr1, tr2 = _make_transfer_pair("rent", None)
-    # Per fix 3 semantics: skip comment constraint when either side is None
+    assert check_same_transfer_transactions(tr1, tr2) is False
+
+
+def test_transfer_match_empty_string_and_none_both_absent() -> None:
+    """"" and None both count as "no comment" — their mix is still a match."""
+    tr1, tr2 = _make_transfer_pair(None, "")
     assert check_same_transfer_transactions(tr1, tr2) is True
