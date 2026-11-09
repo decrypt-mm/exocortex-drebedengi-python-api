@@ -163,9 +163,18 @@ class ObjectType(IntEnum):
     BUDGET_ACCUM_ORDER = 8  # fIXME: proper name
 
 
-def _object_type_from_str(object_type_str: str) -> ObjectType:
-    """Converts Object type string to ObjectType enum."""
-    return ObjectType(int(object_type_str))
+def _object_type_from_str(object_type_str: str) -> ObjectType | int:
+    """Converts Object type string to ObjectType enum.
+
+    The server introduces new object types over time (e.g. account folders,
+    type=9). Values unknown to this package version fall back to the raw int
+    instead of failing the whole conversion; known values resolve to the enum
+    member exactly as before.
+    """
+    try:
+        return ObjectType(int(object_type_str))
+    except ValueError:
+        return int(object_type_str)
 
 
 class ActionType(IntEnum):
@@ -194,7 +203,8 @@ class ChangeRecord:
     Attributes:
         revision_id (int): Revision id.
         action_type (ActionType): Action type (update, create, delete).
-        change_object_type (ObjectType): changed object type.
+        change_object_type (ObjectType | int): changed object type; raw int when the
+            server reports an object type unknown to this package version.
         object_id (int): changed object type id.
         date (datetime): change date in user set timezone.
     """
@@ -203,7 +213,7 @@ class ChangeRecord:
     action_type: ActionType = field(
         converter=_action_type_from_str, metadata={"xml": {"name": "action_id"}}
     )
-    change_object_type: ObjectType = field(
+    change_object_type: ObjectType | int = field(
         converter=_object_type_from_str, metadata={"xml": {"name": "object_type_id"}}
     )
     object_id: int = field(converter=int)
@@ -218,7 +228,8 @@ class ExpenseCategory:
         id (int): id is a unique identifier for the expense category.
         parent_id (int): parent_id is the id of the parent expense category. If the expense category has no parent, parent_id is -1.
         budget_family_id (int): User family ID (for multiuser mode)
-        object_type (ObjectType): Always ObjectType.EXPENSE_CATEGORY
+        object_type (ObjectType | int): Always ObjectType.EXPENSE_CATEGORY (raw int for
+            object types unknown to this package version).
         name (str): Name of the expense category.
         is_hidden (bool): True if the expense category is hidden.
         sort (int): Sort order of the expense category.
@@ -227,7 +238,7 @@ class ExpenseCategory:
     id: int = field(converter=int)
     parent_id: int = field(converter=int)
     budget_family_id: int = field(converter=int)
-    object_type: ObjectType = field(
+    object_type: ObjectType | int = field(
         converter=_object_type_from_str, metadata={"xml": {"name": "type"}}
     )
     name: str = field(converter=str)
@@ -243,7 +254,8 @@ class IncomeSource:
         id (int): id is a unique identifier for the income source.
         parent_id (int): parent_id is the id of the parent income source. If the income source has no parent, parent_id is -1.
         budget_family_id (int): User family ID (for multiuser mode)
-        object_type (ObjectType): Always ObjectType.INCOME_SOURCE
+        object_type (ObjectType | int): Always ObjectType.INCOME_SOURCE (raw int for
+            object types unknown to this package version).
         name (str): Name of the income source.
         is_hidden (bool): True if the income source is hidden.
         sort (int): Sort order of the income source.
@@ -252,7 +264,7 @@ class IncomeSource:
     id: int = field(converter=int)
     parent_id: int = field(converter=int)
     budget_family_id: int = field(converter=int)
-    object_type: ObjectType = field(
+    object_type: ObjectType | int = field(
         converter=_object_type_from_str, metadata={"xml": {"name": "type"}}
     )
     name: str = field(converter=str)
@@ -318,10 +330,14 @@ class Currency:
 class Account:
     """Drebedengi account model.
 
+    Covers both regular accounts (``object_type == ObjectType.ACCOUNT``) and
+    account folders (``object_type == 9``) returned by getPlaceList.
+
     Attributes:
         id (int): id is a unique identifier for the account.
         budget_family_id (int): User family ID (for multiuser mode)
-        object_type (ObjectType): Always ObjectType.ACCOUNT
+        object_type (ObjectType | int): ObjectType.ACCOUNT for accounts; raw int for
+            object types unknown to this package version (account folders report 9).
         name (str): Account name assigned by the user.
         is_hidden (bool): True if the account is hidden.
         is_autohide (bool): True if the account is configured to hide on zero balance.
@@ -329,11 +345,14 @@ class Account:
         sort (int): Sort order of the account.
         wallet_user_id (int | None): User Id if account is marked as a personal wallet.
         icon_id (str | None): Account Icon Id.
+        parent_id (int): Parent account folder ID; -1 for root-level accounts.
+        is_credit_card (bool | None): True if the account is a credit card;
+            None when the server omits the field.
     """
 
     id: int = field(converter=int)
     budget_family_id: int = field(converter=int)
-    object_type: ObjectType = field(
+    object_type: ObjectType | int = field(
         converter=_object_type_from_str, metadata={"xml": {"name": "type"}}
     )
     name: str = field(converter=str)
@@ -345,6 +364,34 @@ class Account:
         converter=optional(int), metadata={"xml": {"name": "purse_of_nuid"}}, default=None
     )
     icon_id: str | None = field(default=None)
+    parent_id: int = field(converter=int, default=-1)
+    is_credit_card: bool | None = field(converter=optional(to_bool), default=None)
+
+
+@define
+class Balance:
+    """Drebedengi account balance model (getBalance API).
+
+    Only leaf accounts carrying a balance are returned by the server; account
+    folders (object type 9) have no balance row.
+
+    Attributes:
+        place_id (int): ID of the account (place) this balance belongs to.
+        place_name (str): Account name.
+        amount (int): Balance amount in hundredths (kopecks).
+        currency_name (str | None): Currency name as reported by the server
+            (e.g. ``"₽"``); None when the server omits the field.
+        parent_id (int): Parent account folder ID; -1 for root-level accounts.
+        is_credit_card (bool | None): True if the account is a credit card;
+            None when the server omits the field.
+    """
+
+    place_id: int = field(converter=int)
+    place_name: str = field(converter=str)
+    amount: int = field(converter=int, metadata={"xml": {"name": "sum"}})
+    currency_name: str | None = field(converter=optional(str), default=None)
+    parent_id: int = field(converter=int, default=-1)
+    is_credit_card: bool | None = field(converter=optional(to_bool), default=None)
 
 
 @define

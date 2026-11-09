@@ -11,6 +11,7 @@ from .api import (
 from .model import (
     Account,
     ActionType,
+    Balance,
     ChangeRecord,
     Check,
     CheckToRecord,
@@ -39,6 +40,7 @@ __all__ = [
     # Domain models
     "Account",
     "ActionType",
+    "Balance",
     "ChangeRecord",
     "Check",
     "CheckToRecord",

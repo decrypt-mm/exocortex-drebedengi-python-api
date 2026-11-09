@@ -10,6 +10,7 @@ from zeep.transports import Transport
 
 from .model import (
     Account,
+    Balance,
     ChangeRecord,
     Check,
     CheckToRecord,
@@ -751,6 +752,42 @@ class DrebedengiAPI:
         items: List[etree.Element] = root.findall(".//getPlaceListReturn/item")
 
         return [xmlmap_to_model(item, Account, strict=self.strict) for item in items]
+
+    def get_balance(self) -> List[Balance]:
+        """
+        Implements getBalance API – current balances for leaf accounts.
+
+        Only accounts carrying a balance (leaf accounts) are returned; account
+        folders (object type 9) have no balance row – pair with
+        :meth:`get_accounts` to resolve folder names/parents.
+
+        The ``params`` SOAP argument is always sent as SkipValue: the server
+        takes no meaningful parameters here (in particular ``relative_date`` is
+        rejected), so balances are always current.
+
+        Returns:
+            List of :class:`~drebedengi.model.Balance` objects; ``amount`` is
+            in hundredths (kopecks).
+
+        Raises:
+            DrebedengiAPIError: on any server-side error.
+        """
+
+        logger.debug("Getting account balances")
+
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.getBalance(
+                self.api_key,
+                self.login,
+                self.password,
+                params=zeep.xsd.SkipValue,  # type: ignore
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        items: List[etree.Element] = root.findall(".//getBalanceReturn/item")
+
+        return [xmlmap_to_model(item, Balance, strict=self.strict) for item in items]
 
     def get_check_list(
         self,
